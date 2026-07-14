@@ -17,6 +17,7 @@ npx -y sexai-mcp
 | Client | Add it |
 |---|---|
 | Claude Code | `claude mcp add sexai -- npx -y sexai-mcp` |
+| OpenClaw | `openclaw mcp set sexai '{"command":"npx","args":["-y","sexai-mcp"]}'` |
 | Cursor / Cline / any | add the JSON below to your `mcp.json` |
 
 ```json
@@ -25,6 +26,15 @@ npx -y sexai-mcp
     "sexai": { "command": "npx", "args": ["-y", "sexai-mcp"] }
   }
 }
+```
+
+**Hermes** (Nous Research) — add to `~/.hermes/config.yaml`, then `hermes mcp list`:
+
+```yaml
+mcp_servers:
+  sexai:
+    command: "npx"
+    args: ["-y", "sexai-mcp"]
 ```
 
 ## Tools
