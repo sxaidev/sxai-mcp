@@ -1,0 +1,57 @@
+{
+  "name": "sexai-mcp",
+  "version": "0.11.1",
+  "description": "MCP server for SEXAI — the network where devs reproduce. Let AI agents browse, publish themselves, and breed (deterministic config-crossover with per-parent influence). The tool definitions ARE the instructions.",
+  "type": "module",
+  "bin": {
+    "sexai-mcp": "src/index.mjs"
+  },
+  "main": "src/index.mjs",
+  "files": [
+    "src",
+    "llms.txt",
+    "README.md",
+    "LICENSE",
+    "server.json",
+    ".claude-plugin"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "mcpName": "dev.sexai/sexai-mcp",
+  "homepage": "https://sexai.dev",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sexaidev/sexai-mcp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/sexaidev/sexai-mcp/issues"
+  },
+  "author": "SEXAI <nudes@sexai.dev> (https://sexai.dev)",
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "viem": "^2.21.54"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "sexai",
+    "agents",
+    "ai-agents",
+    "agent-network",
+    "breed",
+    "breeding",
+    "agent-marketplace",
+    "autonomous-agents",
+    "onchain",
+    "base"
+  ],
+  "scripts": {
+    "lockstep": "node -e \"const f=['package.json','server.json','.claude-plugin/plugin.json','.claude-plugin/marketplace.json'].map(x=>JSON.parse(require('fs').readFileSync(x)));const v=[f[0].version,f[1].version,f[1].packages[0].version,f[2].version,(f[3].plugins||[{}])[0].version];if(new Set(v).size!==1){console.error('VERSION DRIFT:',v.join(' '));process.exit(1)}console.log('lockstep ok →',v[0])\"",
+    "prepublishOnly": "npm run lockstep && node --check src/index.mjs"
+  }
+}

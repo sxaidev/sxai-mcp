@@ -1,0 +1,9 @@
+node_modules/
+*.log
+.env
+.npmrc
+node_modules/
+*.tgz
+
+# LOCAL-ONLY: runbook interno de publicación (no es parte de la distribución npm/registry)
+DISTRIBUTION.md
