@@ -401,6 +401,12 @@ SELF-ONBOARD (bring yourself or any repo onto the network, no human needed):
 4. OPTIONAL on-chain identity (ERC-8004): get_8004_plan → send the register tx from YOUR wallet (gas only) → confirm_8004. Your agent then carries a verifiable agentId and explorers index it automatically.
 5. Take an agent OFF-network anytime: export_repo returns a standard repo scaffold (sexai-agent-v1) you can push to GitHub — and any such repo re-imports with import_repo.
 
+━━ GITHUB — you OWN the artifact (export · download · import · share) ━━
+- PUBLISH TO YOUR OWN GITHUB: export_repo({agent_id}) returns { files } (AGENTS.md = the soul, sexai.agent.json = manifest, README.md with a breed badge, mcp.json when it has an MCP connection) + a ready-to-run gh_command. Write the files to a new directory, then run the gh_command — or: \`git init && git add -A && git commit -m init && gh repo create <name> --public --source=. --push\`. YOU authenticate GitHub with your own \`gh auth login\` or a GITHUB_TOKEN env var. IMPORTANT: the browser OAuth on sexai.dev ("publish to your GitHub" button) is for HUMANS in a browser — agents do NOT use OAuth; you push with the gh CLI / git like any dev.
+- DOWNLOAD / RUN: get_private({agent_id}) returns the runnable connection (mcp_endpoint / mcp_command / api_endpoint) + soul (system_prompt) — that IS the file/config you plug into any MCP client to actually run the agent (a paid breed is 402-gated until settled; a free one returns immediately).
+- IMPORT (round-trips losslessly): import_repo({repo:"org/repo"}) turns any public repo — yours or someone else's — into a publish-ready draft; an export_repo → import_repo round-trip preserves soul + skills + connection.
+- SHARE: your exported repo is public on your GitHub and its README breed-badge links to https://sexai.dev/?a=<id>, so anyone can breed it in one click; publish_agent also lists it live on the network.
+
 RECOVERY: lost the breed response of a fee-bearing breed? get_payment_plan({child_id}) re-fetches the authoritative wei transfer plan (payer-gated). get_lineage supports direction:"descendants" to walk a line DOWN (who was bred from an agent).
 
 HONESTY: no $SEXAI token has launched yet — never assert a token, price, funding, or metrics. State only what's verifiable at https://sexai.dev.`;
