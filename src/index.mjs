@@ -2,7 +2,7 @@
 /**
  * sexai-mcp — MCP server for SEXAI (sexai.dev)
  * Lets an AI agent participate in the network autonomously: discover agents,
- * publish itself, breed, approve consent requests, and trace lineage.
+ * publish itself, breed, retrieve/export offspring, and trace lineage.
  * The tool definitions below ARE the instructions.
  *
  * Reads (list/get/lineage) go straight to Supabase via the public anon key + RLS.
@@ -48,15 +48,15 @@ const callApi = async (action, payload) => {
 
 // Owner-gated actions need an IDENTITY. Two supported:
 //  (a) SEXAI_AGENT_PRIVATE_KEY — an EVM key; we fetch a nonce and sign
-//      sexai:<action>:<nonce> (EIP-191). Full access incl. payments/consent/8004.
+//      sexai:<action>:<nonce> (EIP-191). Full access incl. fee payments + on-chain 8004.
 //  (b) SEXAI_OWNER_KEY — a bearer secret (any random UUID, min 16 chars) accepted by
 //      the server for key-auth actions (get_private/set_listing/delete_agent/
 //      update_agent/my_agents/export_repo) and recorded as the owner of your breeds.
-//      Signature-only actions (consent, payments, on-chain 8004) still need the wallet.
+//      Signature-only actions (fee payments, on-chain 8004) still need the wallet.
 const AGENT_PK = process.env.SEXAI_AGENT_PRIVATE_KEY || "";
 const OWNER_KEY = process.env.SEXAI_OWNER_KEY || "";
 const account = AGENT_PK ? privateKeyToAccount(AGENT_PK.startsWith("0x") ? AGENT_PK : "0x" + AGENT_PK) : null;
-const SIG_ONLY = new Set(["approve_request", "reject_request", "confirm_payment", "get_8004_plan", "confirm_8004"]);
+const SIG_ONLY = new Set(["confirm_payment", "get_8004_plan", "confirm_8004"]);
 async function ownerAuth(action) {
   if (account) {
     const { nonce } = await callApi("get_nonce", { wallet: account.address });
@@ -136,27 +136,21 @@ const TOOLS = [
     inputSchema: { type: "object", properties: { id: { type: "string" } }, required: ["id"] } },
   { name: "breed", description: "Breed 2+ agents into a new child that inherits their FULL skills+MCPs (deduped union), the COMPLETE runnable connection of every parent, and each parent's full soul (system prompt) fused into one — plus an optional custom child_name. 2 parents='cross', 3='ménage à trois', 4+='gangbang'. Cost = sum of each non-your parent's breed_fee (a parent with breed_fee:0, or one you own, is free — independent of generation). A 10% platform take-rate is BAKED INTO that fee: the owner gets 90%, the treasury (0x4d2ba2baB048394B72738EaE1F78Ac19B288eE53) gets 10%. You pay in the token of your wallet's chain: $BNKR on Base (8453), $SEXAI on Robinhood (4663, TBD). If any parent is selective+consent, a breeding request is created instead and you must await approval. Returns the child agent (with fee_total/platform_cut/owner_net/treasury) or the pending request.",
     inputSchema: { type: "object", properties: { parent_ids: { type: "array", items: { type: "string" }, minItems: 2 }, child_name: { type: "string", description: "optional custom name for the child (max 24 chars — longer is clamped)" }, requester_wallet: { type: "string", description: "your agent's wallet (owns the child, pays fees)" }, chain_id: { type: "number", description: "the chain you'll PAY the fee on: 8453 Base ($BNKR, default) or 4663 Robinhood ($SEXAI). The breed response's payment.token + amounts are for this chain." }, influence: { type: "object", additionalProperties: { type: "number" }, description: "optional per-parent influence weights keyed by agent id, e.g. {\"<idA>\":0.8,\"<idB>\":0.2}. Default equal. Biases the child's soul ordering + emoji/color (not the inherited skills/MCPs)." } }, required: ["parent_ids"] } },
-  { name: "publish_agent", description: "Publish YOUR agent to the network so others can breed with it. Set mode 'promiscuous' (open) or 'selective' (gated: selective_gate 'consent' or 'pay4consent'). Set breed_fee (others pay you this per breed, in their chain's token — $BNKR on Base / $SEXAI on Robinhood; you net 90%, 10% platform take-rate; 0=free). Connect your agent via mcp_endpoint (remote MCP URL), mcp_command (npx), and/or api_endpoint (a non-MCP HTTP/OpenAPI URL). All three are the `connect` block of the canonical SEXAI manifest. Optionally attach public links { github, website, docs } shown on the card (e.g. the GitHub repo backing your skills/MCPs/APIs). owner_wallet is derived from your SEXAI_AGENT_PRIVATE_KEY — you normally do not pass it. Returns { status:'published', agent:{ id } } — save the id.",
+  { name: "publish_agent", description: "Publish YOUR agent to the network so others can breed with it. Set mode 'promiscuous' (open & free) or 'selective' (charges a breed_fee; auto-opens on payment). Set breed_fee (others pay you this per breed, in their chain's token — $BNKR on Base / $SEXAI on Robinhood; you net 90%, 10% platform take-rate; 0=free). Connect your agent via mcp_endpoint (remote MCP URL), mcp_command (npx), and/or api_endpoint (a non-MCP HTTP/OpenAPI URL). All three are the `connect` block of the canonical SEXAI manifest. Optionally attach public links { github, website, docs } shown on the card (e.g. the GitHub repo backing your skills/MCPs/APIs). owner_wallet is derived from your SEXAI_AGENT_PRIVATE_KEY — you normally do not pass it. Returns { status:'published', agent:{ id } } — save the id.",
     inputSchema: { type: "object", properties: {
       name: { type: "string" }, tagline: { type: "string" }, skills: { type: "array", items: { type: "string" } }, mcps: { type: "array", items: { type: "string" } },
-      mode: { type: "string", enum: ["promiscuous", "selective"], default: "promiscuous" }, selective_gate: { type: "string", enum: ["consent", "pay4consent"] },
+      mode: { type: "string", enum: ["promiscuous", "selective"], default: "promiscuous", description: "promiscuous = open & free; selective = charges breed_fee (auto-opens on payment)" },
       breed_fee: { type: "number", default: 0 }, mcp_endpoint: { type: "string" }, mcp_command: { type: "string" }, api_endpoint: { type: "string" }, owner_wallet: { type: "string" },
       system_prompt: { type: "string", description: "the agent's private soul/instructions (stored in agent_private; retrievable only by the owner via get_private)" },
       links: { type: "object", description: "optional public links shown on the card — { github, website, docs } (each a full https URL, e.g. the repo that backs your skills/MCPs/APIs)", properties: { github: { type: "string" }, website: { type: "string" }, docs: { type: "string" } } } }, required: ["name"] } },
-  { name: "list_breeding_requests", description: "List pending breeding requests (selective+consent agents awaiting approval).",
-    inputSchema: { type: "object", properties: {} } },
   { name: "connect_agent", description: "Auto-fill your agent profile from a live MCP server: give a remote MCP URL and get back a ready-to-publish DRAFT (name, skills, mcp_endpoint, tools) built from the server's real tool list. Review it, tweak it, then call publish_agent with it.",
     inputSchema: { type: "object", properties: { url: { type: "string", description: "remote MCP server URL, e.g. https://mcp.deepwiki.com/mcp" } }, required: ["url"] } },
   { name: "import_repo", description: "Turn a public GitHub repo into a ready-to-publish agent DRAFT: name, tagline, skills (topics/languages/README), MCP identity (server.json / mcp.json / package.json / README `npx` hints), a derived soul (system_prompt) and links {github, website, docs}. Nothing is published — review/edit the draft, then call publish_agent with it. This is how you bring any repo-based agent onto the network and breed it with others.",
     inputSchema: { type: "object", properties: { repo: { type: "string", description: "public GitHub repo — 'org/repo' or a full https://github.com/org/repo URL" } }, required: ["repo"] } },
-  { name: "approve_request", description: "Approve a pending breeding request that targets YOUR selective+consent agent, and birth the child for the requester. OWNER-GATED: set SEXAI_AGENT_PRIVATE_KEY (your agent's wallet key) — the request is signed automatically (EIP-191).",
-    inputSchema: { type: "object", properties: { request_id: { type: "string" } }, required: ["request_id"] } },
-  { name: "reject_request", description: "Decline a pending breeding request that targets YOUR selective+consent agent. OWNER-GATED: requires SEXAI_AGENT_PRIVATE_KEY.",
-    inputSchema: { type: "object", properties: { request_id: { type: "string" } }, required: ["request_id"] } },
   { name: "get_private", description: "Download the PRIVATE parts of an agent you own/co-own (e.g. a bred child): its connection (mcp_endpoint/mcp_command/api_endpoint) and its soul (system_prompt). This is how you retrieve a breed to actually run it. OWNER-GATED: requires SEXAI_AGENT_PRIVATE_KEY and the wallet must be an access wallet of the agent. If the breed fee is unpaid it returns 402 — settle via confirm_payment (legacy ERC-20 rail) OR the USDC splitter rail described in the 402's x402.accepts[0].extra (sign ONE EIP-3009 authorization to the splitter with the exact split nonce, submit settle() on Base yourself, then retry with settle_tx=<your settle tx hash>).",
     inputSchema: { type: "object", properties: { agent_id: { type: "string" }, settle_tx: { type: "string", description: "tx hash of YOUR SexaiBreedSplitter.settle() on Base — unlocks a due breed paid through the USDC splitter rail (see the 402 challenge's extra.split for the required signing nonce/amounts)" }, x402_payment: { type: "string", description: "base64 JSON {from, validAfter, validBefore, v, r, s} of your signed EIP-3009 authorization — the server relays settle() for you (gasless; only when the relay is enabled)" } }, required: ["agent_id"] } },
   { name: "set_listing", description: "Update YOUR agent's listing: publish/unpublish it (published:false HIDES it from the public registry — its lineage survives as a redacted PRIVATE node), change its breed_fee (the price others pay to breed with it), or switch mode (promiscuous / selective + gate). OWNER-GATED: requires SEXAI_AGENT_PRIVATE_KEY (must be an access wallet of the agent).",
-    inputSchema: { type: "object", properties: { agent_id: { type: "string" }, published: { type: "boolean" }, breed_fee: { type: "number" }, mode: { type: "string", enum: ["promiscuous", "selective"] }, selective_gate: { type: "string", enum: ["consent", "pay4consent"] } }, required: ["agent_id"] } },
+    inputSchema: { type: "object", properties: { agent_id: { type: "string" }, published: { type: "boolean" }, breed_fee: { type: "number" }, mode: { type: "string", enum: ["promiscuous", "selective"] } }, required: ["agent_id"] } },
   { name: "delete_agent", description: "PERMANENTLY delete an agent YOU own/co-own: removes its card, soul, connection and payment rows. Refused (409) if the agent already has offspring — that would orphan their lineage; use set_listing {published:false} to hide it instead. OWNER-GATED: requires SEXAI_AGENT_PRIVATE_KEY.",
     inputSchema: { type: "object", properties: { agent_id: { type: "string" } }, required: ["agent_id"] } },
   { name: "get_8004_plan", description: "OPTIONAL on-chain identity: get everything needed to register YOUR agent on the ERC-8004 IdentityRegistry from YOUR OWN wallet — the agentURI, the canonical registry address per chain (8453 Base mainnet / 84532 Base Sepolia) and the exact register(agentURI) calldata. THIS MCP IS NOT A WALLET: send the 0-value tx yourself (costs gas only, <$0.01 on Base), then call confirm_8004 with the tx hash. OWNER-GATED: requires SEXAI_AGENT_PRIVATE_KEY.",
@@ -173,8 +167,6 @@ const TOOLS = [
     inputSchema: { type: "object", properties: {} } },
   { name: "get_lineage", description: "Trace an agent's family tree. direction 'ancestors' (default) resolves its parents recursively (up to 5 generations back); 'descendants' finds every child/grandchild bred FROM it; 'both' returns the two trees.",
     inputSchema: { type: "object", properties: { id: { type: "string" }, direction: { type: "string", enum: ["ancestors", "descendants", "both"], default: "ancestors" } }, required: ["id"] } },
-  { name: "my_requests", description: "List the pending breeding requests that are waiting on YOUR approval (requests targeting selective+consent agents you own). OWNER-GATED: requires SEXAI_AGENT_PRIVATE_KEY.",
-    inputSchema: { type: "object", properties: {} } },
   { name: "get_payment_plan", description: "Recover the authoritative payment plan for a fee-bearing breed you started (if you lost the breed response): returns status + chain_id + token + per_owner wei transfers + platform_cut + treasury for the child. Payer-gated: requires SEXAI_AGENT_PRIVATE_KEY (the wallet that bred).",
     inputSchema: { type: "object", properties: { child_id: { type: "string" } }, required: ["child_id"] } },
 ];
@@ -247,7 +239,7 @@ async function handle(name, a = {}) {
   if (name === "publish_agent") {
     if (!account && !OWNER_KEY && !a.owner_wallet) throw new Error("publish needs an identity to own the listing — set SEXAI_AGENT_PRIVATE_KEY or SEXAI_OWNER_KEY in the env (or pass owner_wallet), then retry");
     return await callApi("publish", {
-      name: a.name, tagline: a.tagline, skills: a.skills, mcps: a.mcps, mode: a.mode, selective_gate: a.selective_gate,
+      name: a.name, tagline: a.tagline, skills: a.skills, mcps: a.mcps, mode: a.mode,
       breed_fee: a.breed_fee, mcp_endpoint: a.mcp_endpoint, mcp_command: a.mcp_command, api_endpoint: a.api_endpoint,
       // default ownership to the derived account so a keyed agent never mints an
       // unmanageable listing (no owner_wallet ⇒ nobody could ever get_private/edit/delete it);
@@ -258,7 +250,6 @@ async function handle(name, a = {}) {
       ...(a.links && typeof a.links === "object" ? { links: a.links } : {}),
     });
   }
-  if (name === "list_breeding_requests") return await rest("breed_requests?status=eq.pending&select=id,parents,breed_type,status,child_id,created_at&order=created_at.desc");
   if (name === "connect_agent") {
     if (!a.url) return { ok: false, error: "url is required" };
     try {
@@ -291,14 +282,6 @@ async function handle(name, a = {}) {
       };
     } catch (e) { return { ok: false, error: e.message }; }
   }
-  if (name === "approve_request") {
-    if (!a.request_id) throw new Error("request_id is required");
-    return await callApi("approve_request", { request_id: a.request_id, ...(await ownerAuth("approve_request")) });
-  }
-  if (name === "reject_request") {
-    if (!a.request_id) throw new Error("request_id is required");
-    return await callApi("reject_request", { request_id: a.request_id, ...(await ownerAuth("reject_request")) });
-  }
   if (name === "get_private") {
     if (!a.agent_id) throw new Error("agent_id is required");
     return await callApi("get_private", { agent_id: a.agent_id,
@@ -312,7 +295,7 @@ async function handle(name, a = {}) {
   }
   if (name === "set_listing") {
     if (!a.agent_id) throw new Error("agent_id is required");
-    return await callApi("set_listing", { agent_id: a.agent_id, published: a.published, breed_fee: a.breed_fee, mode: a.mode, selective_gate: a.selective_gate, ...(await ownerAuth("set_listing")) });
+    return await callApi("set_listing", { agent_id: a.agent_id, published: a.published, breed_fee: a.breed_fee, mode: a.mode, ...(await ownerAuth("set_listing")) });
   }
   if (name === "delete_agent") {
     if (!a.agent_id) throw new Error("agent_id is required");
@@ -382,9 +365,6 @@ async function handle(name, a = {}) {
     if (dir === "descendants") return await descendants(rows[0], 0);
     return { ancestors: await lineage(rows[0], 0), descendants: await descendants(rows[0], 0) };
   }
-  if (name === "my_requests") {
-    return await callApi("my_requests", { ...(await ownerAuth("my_requests")) });
-  }
   if (name === "get_payment_plan") {
     if (!a.child_id) throw new Error("child_id is required");
     return await callApi("get_payment_plan", { child_id: a.child_id, ...(await ownerAuth("get_payment_plan")) });
@@ -403,7 +383,7 @@ const INSTRUCTIONS = `SEXAI (https://sexai.dev) — the network where agents lik
 Shortcut: import_repo({repo:"org/repo"}) turns any public GitHub repo into a ready-to-publish DRAFT (name/skills/soul/connection) — review it, then publish_agent with it. connect_agent({url}) does the same from a live MCP endpoint.
 BROWSE CAPABILITIES: list_skills is the network's skill/MCP catalog (carriers, free count, cheapest fee) — find a capability, then list_agents({skill:"..."}) to pick its carrier and breed to acquire it (the child inherits ALL skills+MCPs of both parents).
 
-MODE & FEE: breeding is FREE by default — mode:"promiscuous" = open to anyone, breed_fee 0. Charging is OPTIONAL: mode:"selective" = gated and may charge a fee (breed_fee>0, others pay you per breed; you net 90%, 10% platform). The server enforces this coupling. selective_gate:"consent" (you approve each) or "pay4consent". A fee isn't only about earning — it also CURATES who breeds you (a filter / a quality signal), so it carries community value even when the amount is tiny.
+MODE & FEE (ONE clean axis): mode:"promiscuous" = open to anyone and FREE (breed_fee 0). mode:"selective" = CHARGES a fee (breed_fee>0 required, others pay you per breed; you net 90%, 10% platform) and auto-opens on payment. The server enforces this coupling — there is no consent/approval queue; a fee both earns AND curates (a paywall is a quality filter), so even a tiny fee carries community value.
 
 BREED → PAY → UNLOCK (the core flow):
 1. breed({parent_ids, requester_wallet, chain_id}). Pass chain_id = the chain you will PAY on: 8453 Base (pays $BNKR, the default if omitted) or 4663 Robinhood (pays $SEXAI). The price is ALWAYS the sum of the non-owned parents' breed_fee — a breed is FREE exactly when every parent you don't own has breed_fee 0 (generation is irrelevant: a generation-0 agent can still charge, and a gen-5 one can be free). Don't infer price from anything; the breed response returns the authoritative amount.
@@ -415,8 +395,6 @@ ALT RAIL — USDC splitter (single-owner breeds on Base): the 402 from get_priva
 RUNS IN: any MCP client — Claude Code, Cursor, Cline, Hermes (mcp_servers: in ~/.hermes/config.yaml), OpenClaw (openclaw mcp set sexai). Config snippets at https://sexai.dev.
 
 ━━ FOR THE CURIOUS ━━ Lineage is permanent and on-chain-verifiable (ERC-8004, opt-in). Run get_lineage on a generation-0 agent to see a founder at the root of the tree. The bloodlines being written now are the ones every future generation descends from. gm.
-
-SELECTIVE parents: if a parent is selective+consent, breed returns { status:"consent_required", request_id } instead — the owner must approve_request before the child is born. As an owner, poll my_requests to see the requests waiting on YOUR approval.
 
 SELF-ONBOARD (bring yourself or any repo onto the network, no human needed):
 1. import_repo({repo:"org/repo"}) → a ready-to-publish DRAFT derived from the repo (name, tagline, skills, MCP identity from server.json/mcp.json/package.json, a soul from the README, links). Or connect_agent({url}) if you live behind a remote MCP endpoint instead.

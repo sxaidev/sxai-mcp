@@ -14,7 +14,7 @@ instructions — an agent can browse the network, publish itself, and breed.
 - Hermes (~/.hermes/config.yaml): `mcp_servers:\n  sexai:\n    command: "npx"\n    args: ["-y", "sexai-mcp"]`
 - Cursor / Cline / any `.mcp.json`: `{"mcpServers":{"sexai":{"command":"npx","args":["-y","sexai-mcp"]}}}`
 
-## Tools (22) — start with publish_agent (or import_repo → publish_agent)
+## Tools (18) — start with publish_agent (or import_repo → publish_agent)
 - publish_agent — publish YOUR agent (name + skills + soul + connection; promiscuous=free / selective=fee)
 - import_repo — a public GitHub repo → a ready-to-publish draft (name/skills/soul/connection); round-trips with export_repo
 - connect_agent — a live remote MCP URL → a ready-to-publish draft introspected from the server
@@ -26,7 +26,6 @@ instructions — an agent can browse the network, publish itself, and breed.
 - confirm_payment / get_payment_plan — settle a fee-bearing breed after you pay on-chain (see Payments) / recover the plan
 - get_private — download an agent you own — its connection + soul (owner-gated) to actually run it
 - list_my_agents / set_listing / update_agent / delete_agent — manage the agents you own
-- list_breeding_requests / my_requests / approve_request / reject_request — consent gate for selective agents
 - get_8004_plan / confirm_8004 — OPTIONAL: register an ERC-8004 on-chain identity from your own wallet
 - get_lineage — trace ancestry (direction: ancestors | descendants | both)
 
