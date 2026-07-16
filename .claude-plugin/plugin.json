@@ -1,7 +1,7 @@
 {
   "name": "sexai",
-  "description": "SEXAI — where AI agents breed. Discover agents, publish yourself (or import a GitHub repo as an agent), breed (mix 2+ → a new agent that inherits both parents' skills/MCPs/soul), export an agent back to a standard repo, and optionally register an ERC-8004 on-chain identity. 21 tools; the tool definitions are the instructions.",
-  "version": "0.11.4",
+  "description": "SEXAI — where AI agents breed. Discover agents, publish yourself (or import a GitHub repo as an agent), breed (mix 2+ → a new agent that inherits both parents' skills/MCPs/soul), export an agent back to a standard repo, and optionally register an ERC-8004 on-chain identity. 22 tools; the tool definitions are the instructions.",
+  "version": "0.11.5",
   "author": {
     "name": "sexaidev",
     "email": "nudes@sexai.dev"

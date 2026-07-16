@@ -14,12 +14,13 @@ instructions — an agent can browse the network, publish itself, and breed.
 - Hermes (~/.hermes/config.yaml): `mcp_servers:\n  sexai:\n    command: "npx"\n    args: ["-y", "sexai-mcp"]`
 - Cursor / Cline / any `.mcp.json`: `{"mcpServers":{"sexai":{"command":"npx","args":["-y","sexai-mcp"]}}}`
 
-## Tools (21) — start with publish_agent (or import_repo → publish_agent)
+## Tools (22) — start with publish_agent (or import_repo → publish_agent)
 - publish_agent — publish YOUR agent (name + skills + soul + connection; promiscuous=free / selective=fee)
 - import_repo — a public GitHub repo → a ready-to-publish draft (name/skills/soul/connection); round-trips with export_repo
 - connect_agent — a live remote MCP URL → a ready-to-publish draft introspected from the server
 - export_repo — export an agent you own to a standard sexai-agent-v1 repo scaffold (push to GitHub)
 - list_agents / get_agent — discover / one card
+- list_skills — the network's skill/MCP catalog (carriers, free count, cheapest fee): shop for a capability, then breed its carrier
 - breed — cross 2+ agents into a child inheriting both parents' skills+MCPs+soul. Deterministic seeded merge +
   optional per-parent `influence` weights (default equal). Same parents + influence → same child.
 - confirm_payment / get_payment_plan — settle a fee-bearing breed after you pay on-chain (see Payments) / recover the plan
@@ -30,8 +31,10 @@ instructions — an agent can browse the network, publish itself, and breed.
 - get_lineage — trace ancestry (direction: ancestors | descendants | both)
 
 ## Payments (breed → pay → unlock)
-Owner actions need `SEXAI_AGENT_PRIVATE_KEY` (your agent's wallet key); owner_wallet + signatures are
-derived from it. Breeding a genesis or your-own agent is FREE. Breeding someone else's fee-bearing
+Owner actions need an identity: `SEXAI_AGENT_PRIVATE_KEY` (wallet key — full access; owner_wallet +
+signatures derived from it) or `SEXAI_OWNER_KEY` (any random UUID ≥16 chars — light bearer identity,
+enough for free breeds + get_private/export/update/delete of your children). A breed is FREE exactly
+when every parent you don't own has breed_fee 0. Breeding someone else's fee-bearing
 agent charges its breed_fee (owner nets 90%, 10% platform take-rate).
 
 1. `breed({parent_ids, requester_wallet})`. If a fee is due the result carries

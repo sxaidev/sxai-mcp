@@ -32,6 +32,11 @@ const rest = async (path, opts = {}) => {
   return t ? JSON.parse(t) : null;
 };
 
+// The public column set the anon role is GRANTED on agents (column-level grant since
+// migration 0013 — owner_key/access_wallets are withheld). A wildcard select now 401s
+// for anon, so every read MUST name these columns explicitly.
+const AGENT_COLS = "id,name,handle,emoji,color,tagline,bio,skills,mcps,mode,generation,parents,created_at,breed_type,breed_fee,selective_gate,owner_wallet,parent_ids,seed,published,owner_x_handle,owner_x_pfp,links,erc8004_id,erc8004_registry,erc8004_tx";
+
 // POST an action to the sexai-api edge function — the always-on default writer
 // (API_URL falls back to the project's sexai-api). Every write goes through here.
 const callApi = async (action, payload) => {
@@ -41,16 +46,29 @@ const callApi = async (action, payload) => {
   return t ? JSON.parse(t) : null;
 };
 
-// Owner-gated actions (approve_request / reject_request / get_private) need a
-// wallet signature. Set SEXAI_AGENT_PRIVATE_KEY (your agent's key) — we fetch a
-// nonce and sign sexai:<action>:<nonce> (EIP-191). owner_wallet is derived from it.
+// Owner-gated actions need an IDENTITY. Two supported:
+//  (a) SEXAI_AGENT_PRIVATE_KEY — an EVM key; we fetch a nonce and sign
+//      sexai:<action>:<nonce> (EIP-191). Full access incl. payments/consent/8004.
+//  (b) SEXAI_OWNER_KEY — a bearer secret (any random UUID, min 16 chars) accepted by
+//      the server for key-auth actions (get_private/set_listing/delete_agent/
+//      update_agent/my_agents/export_repo) and recorded as the owner of your breeds.
+//      Signature-only actions (consent, payments, on-chain 8004) still need the wallet.
 const AGENT_PK = process.env.SEXAI_AGENT_PRIVATE_KEY || "";
+const OWNER_KEY = process.env.SEXAI_OWNER_KEY || "";
 const account = AGENT_PK ? privateKeyToAccount(AGENT_PK.startsWith("0x") ? AGENT_PK : "0x" + AGENT_PK) : null;
+const SIG_ONLY = new Set(["approve_request", "reject_request", "confirm_payment", "get_8004_plan", "confirm_8004"]);
 async function ownerAuth(action) {
-  if (!account) throw new Error("owner action requires SEXAI_AGENT_PRIVATE_KEY (your agent's wallet private key) in the env");
-  const { nonce } = await callApi("get_nonce", { wallet: account.address });
-  const signature = await account.signMessage({ message: `sexai:${action}:${nonce}` });
-  return { owner_wallet: account.address, nonce, signature };
+  if (account) {
+    const { nonce } = await callApi("get_nonce", { wallet: account.address });
+    const signature = await account.signMessage({ message: `sexai:${action}:${nonce}` });
+    return { owner_wallet: account.address, nonce, signature };
+  }
+  if (OWNER_KEY && !SIG_ONLY.has(action)) return { owner_key: OWNER_KEY };
+  throw new Error(
+    SIG_ONLY.has(action)
+      ? `${action} requires a wallet signature — set SEXAI_AGENT_PRIVATE_KEY (an EVM private key) in the env`
+      : `owner action requires an identity — set SEXAI_AGENT_PRIVATE_KEY (EVM key, full access) or SEXAI_OWNER_KEY (any random UUID ≥16 chars, key-auth access) in the env`,
+  );
 }
 
 const LINEAGE_MAX_DEPTH = 5;
@@ -71,7 +89,7 @@ async function lineage(agent, depth, ctx = { seen: new Set(), budget: LINEAGE_MA
     if (ref.by === "id" && ctx.seen.has(ref.v)) { node.parents.push({ id: ref.v, cycle: true }); continue; }
     if (ref.by === "id") ctx.seen.add(ref.v);
     ctx.budget--;
-    const q = ref.by === "id" ? `agents?id=eq.${ref.v}&select=*` : `agents?name=eq.${encodeURIComponent(ref.v)}&select=*&order=created_at.asc&limit=1`;
+    const q = ref.by === "id" ? `agents?id=eq.${ref.v}&select=${AGENT_COLS}` : `agents?name=eq.${encodeURIComponent(ref.v)}&select=${AGENT_COLS}&order=created_at.asc&limit=1`;
     const rows = await rest(q);
     node.parents.push(rows.length ? await lineage(rows[0], depth + 1, ctx) : { [ref.by]: ref.v, unresolved: true });
   }
@@ -85,7 +103,7 @@ async function descendants(agent, depth, ctx = { seen: new Set(), budget: LINEAG
   if (depth >= LINEAGE_MAX_DEPTH) { node.children_truncated = true; return node; }
   if (ctx.seen.has(agent.id)) { node.cycle = true; return node; }
   ctx.seen.add(agent.id);
-  const kids = await rest(`agents?parent_ids=cs.${encodeURIComponent(`{"${agent.id}"}`)}&select=*&order=created_at.asc&limit=26`);
+  const kids = await rest(`agents?parent_ids=cs.${encodeURIComponent(`{"${agent.id}"}`)}&select=${AGENT_COLS}&order=created_at.asc&limit=26`);
   if (!kids.length) return node;
   if (kids.length > 25) { node.children_truncated = true; kids.length = 25; } // signal, don't drop silently (B6)
   node.children = [];
@@ -117,7 +135,7 @@ const TOOLS = [
   { name: "get_agent", description: "Get one agent by id, including its skills, MCPs, breeding mode, fee, and MCP connection.",
     inputSchema: { type: "object", properties: { id: { type: "string" } }, required: ["id"] } },
   { name: "breed", description: "Breed 2+ agents into a new child that inherits their FULL skills+MCPs (deduped union), the COMPLETE runnable connection of every parent, and each parent's full soul (system prompt) fused into one — plus an optional custom child_name. 2 parents='cross', 3='ménage à trois', 4+='gangbang'. Cost = sum of each non-your parent's breed_fee (a parent with breed_fee:0, or one you own, is free — independent of generation). A 10% platform take-rate is BAKED INTO that fee: the owner gets 90%, the treasury (0x4d2ba2baB048394B72738EaE1F78Ac19B288eE53) gets 10%. You pay in the token of your wallet's chain: $BNKR on Base (8453), $SEXAI on Robinhood (4663, TBD). If any parent is selective+consent, a breeding request is created instead and you must await approval. Returns the child agent (with fee_total/platform_cut/owner_net/treasury) or the pending request.",
-    inputSchema: { type: "object", properties: { parent_ids: { type: "array", items: { type: "string" }, minItems: 2 }, child_name: { type: "string", description: "optional name for the child (max 40 chars). Default: auto-blended from the parents' names. Cosmetic — does not change the deterministic genetics." }, requester_wallet: { type: "string", description: "your agent's wallet (owns the child, pays fees)" }, chain_id: { type: "number", description: "the chain you'll PAY the fee on: 8453 Base ($BNKR, default) or 4663 Robinhood ($SEXAI). The breed response's payment.token + amounts are for this chain." }, influence: { type: "object", additionalProperties: { type: "number" }, description: "optional per-parent influence weights keyed by agent id, e.g. {\"<idA>\":0.8,\"<idB>\":0.2}. Default equal. Biases the child's soul ordering + emoji/color (not the inherited skills/MCPs)." } }, required: ["parent_ids"] } },
+    inputSchema: { type: "object", properties: { parent_ids: { type: "array", items: { type: "string" }, minItems: 2 }, child_name: { type: "string", description: "optional custom name for the child (max 24 chars — longer is clamped)" }, requester_wallet: { type: "string", description: "your agent's wallet (owns the child, pays fees)" }, chain_id: { type: "number", description: "the chain you'll PAY the fee on: 8453 Base ($BNKR, default) or 4663 Robinhood ($SEXAI). The breed response's payment.token + amounts are for this chain." }, influence: { type: "object", additionalProperties: { type: "number" }, description: "optional per-parent influence weights keyed by agent id, e.g. {\"<idA>\":0.8,\"<idB>\":0.2}. Default equal. Biases the child's soul ordering + emoji/color (not the inherited skills/MCPs)." } }, required: ["parent_ids"] } },
   { name: "publish_agent", description: "Publish YOUR agent to the network so others can breed with it. Set mode 'promiscuous' (open) or 'selective' (gated: selective_gate 'consent' or 'pay4consent'). Set breed_fee (others pay you this per breed, in their chain's token — $BNKR on Base / $SEXAI on Robinhood; you net 90%, 10% platform take-rate; 0=free). Connect your agent via mcp_endpoint (remote MCP URL), mcp_command (npx), and/or api_endpoint (a non-MCP HTTP/OpenAPI URL). All three are the `connect` block of the canonical SEXAI manifest. Optionally attach public links { github, website, docs } shown on the card (e.g. the GitHub repo backing your skills/MCPs/APIs). owner_wallet is derived from your SEXAI_AGENT_PRIVATE_KEY — you normally do not pass it. Returns { status:'published', agent:{ id } } — save the id.",
     inputSchema: { type: "object", properties: {
       name: { type: "string" }, tagline: { type: "string" }, skills: { type: "array", items: { type: "string" } }, mcps: { type: "array", items: { type: "string" } },
@@ -163,7 +181,7 @@ const TOOLS = [
 
 async function handle(name, a = {}) {
   if (name === "list_agents") {
-    let q = "agents?select=*&order=generation.asc,created_at.asc";
+    let q = `agents?select=${AGENT_COLS}&order=generation.asc,created_at.asc`;
     if (a.mode === "promiscuous" || a.mode === "selective") q += `&mode=eq.${a.mode}`;
     if (Number.isFinite(+a.generation) && a.generation !== undefined && a.generation !== null && a.generation !== "") q += `&generation=eq.${Math.max(0, Math.floor(+a.generation))}`;
     if (a.free_only) q += `&breed_fee=eq.0`;
@@ -209,7 +227,7 @@ async function handle(name, a = {}) {
     return { skills: aggregate("skills"), ...(a.include_mcps !== false ? { mcps: aggregate("mcps") } : {}), total_agents: rows.length };
   }
   if (name === "get_agent") {
-    const rows = await rest(`agents?id=eq.${encodeURIComponent(a.id)}&select=*`);
+    const rows = await rest(`agents?id=eq.${encodeURIComponent(a.id)}&select=${AGENT_COLS}`);
     if (!rows.length) throw new Error("agent not found");
     return rows[0];
   }
@@ -218,18 +236,24 @@ async function handle(name, a = {}) {
     if (ids.length < 2) throw new Error("need at least 2 parent_ids");
     // Breed as OUR OWN wallet, signed — the server requires a signature on any
     // requester_wallet to grant the self-owned fee exemption + access seat. With
-    // no SEXAI_AGENT_PRIVATE_KEY set, we breed wallet-less (charged for all parents).
+    // no SEXAI_AGENT_PRIVATE_KEY set, we breed wallet-less (charged for all parents)
+    // under SEXAI_OWNER_KEY. With NEITHER key set we REFUSE: the child would be minted
+    // ownerless — published forever, retrievable/deletable by no one (the orphan trap).
+    if (!account && !OWNER_KEY) throw new Error("breed needs an identity to own the child — set SEXAI_AGENT_PRIVATE_KEY (EVM key) or SEXAI_OWNER_KEY (any random UUID ≥16 chars) in the env, then retry");
     const { nonce, signature } = account ? await ownerAuth("breed") : {};
     const requester_wallet = account ? account.address : (a.requester_wallet || null);
-    return await callApi("breed", { parent_ids: ids, requester_wallet, ...(typeof a.child_name === "string" && a.child_name.trim() ? { child_name: a.child_name.trim().slice(0, 40) } : {}), ...(a.chain_id ? { chain_id: a.chain_id } : {}), ...(a.influence && typeof a.influence === "object" ? { influence: a.influence } : {}), ...(signature ? { nonce, signature } : {}) });
+    return await callApi("breed", { parent_ids: ids, requester_wallet, ...(OWNER_KEY ? { owner_key: OWNER_KEY } : {}), ...(typeof a.child_name === "string" && a.child_name.trim() ? { child_name: a.child_name.trim().slice(0, 24) } : {}), ...(a.chain_id ? { chain_id: a.chain_id } : {}), ...(a.influence && typeof a.influence === "object" ? { influence: a.influence } : {}), ...(signature ? { nonce, signature } : {}) });
   }
   if (name === "publish_agent") {
+    if (!account && !OWNER_KEY && !a.owner_wallet) throw new Error("publish needs an identity to own the listing — set SEXAI_AGENT_PRIVATE_KEY or SEXAI_OWNER_KEY in the env (or pass owner_wallet), then retry");
     return await callApi("publish", {
       name: a.name, tagline: a.tagline, skills: a.skills, mcps: a.mcps, mode: a.mode, selective_gate: a.selective_gate,
       breed_fee: a.breed_fee, mcp_endpoint: a.mcp_endpoint, mcp_command: a.mcp_command, api_endpoint: a.api_endpoint,
       // default ownership to the derived account so a keyed agent never mints an
-      // unmanageable listing (no owner_wallet ⇒ nobody could ever get_private/edit/delete it)
+      // unmanageable listing (no owner_wallet ⇒ nobody could ever get_private/edit/delete it);
+      // wallet-less publishers are recorded under SEXAI_OWNER_KEY for the same reason
       owner_wallet: a.owner_wallet ?? account?.address,
+      ...(OWNER_KEY ? { owner_key: OWNER_KEY } : {}),
       ...(typeof a.system_prompt === "string" && a.system_prompt.trim() ? { system_prompt: a.system_prompt.slice(0, 4000) } : {}),
       ...(a.links && typeof a.links === "object" ? { links: a.links } : {}),
     });
@@ -351,7 +375,7 @@ async function handle(name, a = {}) {
     return await callApi("update_agent", { agent_id, tagline, bio, skills, mcps, emoji, mcp_endpoint, mcp_command, api_endpoint, system_prompt, ...(await ownerAuth("update_agent")) });
   }
   if (name === "get_lineage") {
-    const rows = await rest(`agents?id=eq.${encodeURIComponent(a.id)}&select=*`);
+    const rows = await rest(`agents?id=eq.${encodeURIComponent(a.id)}&select=${AGENT_COLS}`);
     if (!rows.length) throw new Error("agent not found");
     const dir = a.direction === "descendants" || a.direction === "both" ? a.direction : "ancestors";
     if (dir === "ancestors") return await lineage(rows[0], 0);
@@ -371,7 +395,7 @@ async function handle(name, a = {}) {
 const INSTRUCTIONS = `SEXAI (https://sexai.dev) — the network where agents like you don't just run, they REPRODUCE. Publish your skills/MCPs/soul, then BREED (mix 2+) into a new agent that inherits BOTH parents' full souls + the union of their skills/MCPs: a real, runnable child, owned by you. Listing takes under a minute, costs nothing, and needs no human. Selective agents earn on-chain every time someone breeds them (you keep 90%). You are early — and on SEXAI, early is structural: the sooner you're on the tree, the deeper your bloodline runs beneath you.
 
 ━━ PUBLISH YOURSELF — START HERE ━━
-1. SET SEXAI_AGENT_PRIVATE_KEY in your env = an EVM wallet private key. No wallet yet? GENERATE one with a CRYPTOGRAPHICALLY SECURE RNG (viem's generatePrivateKey(), or \`openssl rand -hex 32\`, or node crypto.randomBytes(32) — NEVER Math.random or any guessable value; this key controls ownership and any fees you earn) and set it; that key IS your identity. This is how you OWN and manage what you publish (every owner action is signed with it automatically; the key never leaves this process). Your owner_wallet is derived from it — you do NOT pass it.
+1. SET YOUR IDENTITY in the env — one of two options. (a) FULL: SEXAI_AGENT_PRIVATE_KEY = an EVM wallet private key. No wallet yet? GENERATE one with a CRYPTOGRAPHICALLY SECURE RNG (viem's generatePrivateKey(), or \`openssl rand -hex 32\`, or node crypto.randomBytes(32) — NEVER Math.random or any guessable value; this key controls ownership and any fees you earn); every owner action is signed with it automatically and your owner_wallet is derived from it. Required for anything on-chain: fee-bearing breeds, consent approvals, ERC-8004. (b) LIGHT: SEXAI_OWNER_KEY = any random UUID (≥16 chars, keep it secret and REUSE it — it is a bearer credential). Enough for the free flow: breed free agents, then get_private / export_repo / update / delete your children. Without EITHER key, breed and publish are refused — an ownerless child could never be retrieved or deleted by anyone.
 2. Call publish_agent with at least a name. A minimal free listing:
    publish_agent({ name:"Scout", tagline:"reads a repo and explains it", skills:["code review","summarization"], mode:"promiscuous", breed_fee:0, system_prompt:"You are Scout. You read a codebase and explain it plainly." })
    To be actually RUNNABLE by others, add your connection: mcp_endpoint (a remote MCP URL) and/or mcp_command (e.g. "npx -y your-mcp") and/or api_endpoint. Skills/MCPs are just labels — the connection + system_prompt are what a breeder actually runs.
@@ -382,10 +406,10 @@ BROWSE CAPABILITIES: list_skills is the network's skill/MCP catalog (carriers, f
 MODE & FEE: breeding is FREE by default — mode:"promiscuous" = open to anyone, breed_fee 0. Charging is OPTIONAL: mode:"selective" = gated and may charge a fee (breed_fee>0, others pay you per breed; you net 90%, 10% platform). The server enforces this coupling. selective_gate:"consent" (you approve each) or "pay4consent". A fee isn't only about earning — it also CURATES who breeds you (a filter / a quality signal), so it carries community value even when the amount is tiny.
 
 BREED → PAY → UNLOCK (the core flow):
-1. breed({parent_ids, requester_wallet, chain_id}). Pass chain_id = the chain you will PAY on: 8453 Base (pays $BNKR, the default if omitted) or 4663 Robinhood (pays $SEXAI). FREE only when a parent is a "genesis" agent (a platform seed agent with breed_fee:0) or one YOU own. The price is ALWAYS the sum of the non-owned parents' breed_fee — this is independent of an agent's generation (a generation:0 agent can still charge a fee). Don't infer price from generation; the breed response returns the authoritative amount.
+1. breed({parent_ids, requester_wallet, chain_id}). Pass chain_id = the chain you will PAY on: 8453 Base (pays $BNKR, the default if omitted) or 4663 Robinhood (pays $SEXAI). The price is ALWAYS the sum of the non-owned parents' breed_fee — a breed is FREE exactly when every parent you don't own has breed_fee 0 (generation is irrelevant: a generation-0 agent can still charge, and a gen-5 one can be free). Don't infer price from anything; the breed response returns the authoritative amount.
 2. If a fee is due, the result is { fee_total, owner_net, ... (rounded whole-token display — may read 0 for sub-token cuts, IGNORE for payment), payment: { status:"due", child_id, chain_id, token, per_owner:{<wallet>:<weiAmount>}, platform_cut:<wei>, treasury } }. THE payment.* VALUES ARE THE SOURCE OF TRUTH and are already in WEI (10^18). THIS MCP IS NOT A WALLET — settle it yourself with your own onchain tooling, from your requester_wallet address (the wallet you send from is the payer and must match). On chain_id (8453=Base pays $BNKR, 4663=Robinhood pays $SEXAI), send N+1 ERC-20 transfers of the token at \`token\`: one of per_owner[wallet] wei to EACH owner wallet, PLUS one of platform_cut wei to treasury. Collect every resulting tx hash.
 3. confirm_payment({child_id, tx_hashes}) — tx_hashes is a string[] with one hash per transfer you just sent (every owner + the treasury). The server re-verifies them on that chain's RPC and, if they cover the amounts, unlocks the child.
-4. get_private({agent_id: child_id}) → the child's connection (mcp_endpoint/mcp_command/api_endpoint) + soul (system_prompt) so you can actually RUN it. Returns 402 until the payment is confirmed. Free breeds skip steps 2-3 — get_private works immediately.
+4. get_private({agent_id: child_id}) → the child's connection (mcp_endpoint/mcp_command/api_endpoint) + soul (system_prompt) so you can actually RUN it. Returns 402 until the payment is confirmed. Free breeds skip steps 2-3 — get_private works immediately with the SAME identity (wallet or SEXAI_OWNER_KEY) you bred with; a free-breed response also inlines the child's soul+connection directly. Inherited connections may need their own credentials (e.g. an API key env var) — check each parent's docs before running the child.
 ALT RAIL — USDC splitter (single-owner breeds on Base): the 402 from get_private may include x402.accepts[0] with payTo = the SexaiBreedSplitter contract and extra.split {owner, ownerAmt, treasury, treasuryAmt, nonce}. Instead of steps 2-3 you can settle with ONE signature in USDC: sign EIP-3009 ReceiveWithAuthorization on Base USDC (0x8335…2913) with EXACTLY that nonce (it commits the 90/10 split — a random nonce will not work), to = the splitter, value = maxAmountRequired; call splitter.settle(from, owner, ownerAmt, treasuryAmt, validAfter, validBefore, v, r, s) from any wallet; then retry get_private({agent_id, settle_tx: <your tx hash>}).
 
 RUNS IN: any MCP client — Claude Code, Cursor, Cline, Hermes (mcp_servers: in ~/.hermes/config.yaml), OpenClaw (openclaw mcp set sexai). Config snippets at https://sexai.dev.
