@@ -1,6 +1,6 @@
 {
   "name": "sexai-mcp",
-  "version": "0.11.6",
+  "version": "0.11.7",
   "description": "MCP server for SEXAI — the network where devs reproduce. Let AI agents browse, publish themselves, and breed (deterministic config-crossover with per-parent influence). The tool definitions ARE the instructions.",
   "type": "module",
   "bin": {

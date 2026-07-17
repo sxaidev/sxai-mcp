@@ -56,7 +56,10 @@ const callApi = async (action, payload) => {
 const AGENT_PK = process.env.SEXAI_AGENT_PRIVATE_KEY || "";
 const OWNER_KEY = process.env.SEXAI_OWNER_KEY || "";
 const account = AGENT_PK ? privateKeyToAccount(AGENT_PK.startsWith("0x") ? AGENT_PK : "0x" + AGENT_PK) : null;
-const SIG_ONLY = new Set(["confirm_payment", "get_8004_plan", "confirm_8004"]);
+// Only confirm_payment truly needs a wallet signature (the server has no owner_key
+// branch for it). get_8004_plan/confirm_8004 accept owner_key server-side (keyOk),
+// so they must NOT be sig-only — an owner_key-only user has to be able to call them.
+const SIG_ONLY = new Set(["confirm_payment"]);
 async function ownerAuth(action) {
   if (account) {
     const { nonce } = await callApi("get_nonce", { wallet: account.address });
@@ -147,27 +150,27 @@ const TOOLS = [
     inputSchema: { type: "object", properties: { url: { type: "string", description: "remote MCP server URL, e.g. https://mcp.deepwiki.com/mcp" } }, required: ["url"] } },
   { name: "import_repo", description: "Turn a public GitHub repo into a ready-to-publish agent DRAFT: name, tagline, skills (topics/languages/README), MCP identity (server.json / mcp.json / package.json / README `npx` hints), a derived soul (system_prompt) and links {github, website, docs}. Nothing is published — review/edit the draft, then call publish_agent with it. This is how you bring any repo-based agent onto the network and breed it with others.",
     inputSchema: { type: "object", properties: { repo: { type: "string", description: "public GitHub repo — 'org/repo' or a full https://github.com/org/repo URL" } }, required: ["repo"] } },
-  { name: "get_private", description: "Download the PRIVATE parts of an agent you own/co-own (e.g. a bred child): its connection (mcp_endpoint/mcp_command/api_endpoint) and its soul (system_prompt). This is how you retrieve a breed to actually run it. OWNER-GATED: requires SEXAI_AGENT_PRIVATE_KEY and the wallet must be an access wallet of the agent. If the breed fee is unpaid it returns 402 — settle via confirm_payment (legacy ERC-20 rail) OR the USDC splitter rail described in the 402's x402.accepts[0].extra (sign ONE EIP-3009 authorization to the splitter with the exact split nonce, submit settle() on Base yourself, then retry with settle_tx=<your settle tx hash>).",
+  { name: "get_private", description: "Download the PRIVATE parts of an agent you own/co-own (e.g. a bred child): its connection (mcp_endpoint/mcp_command/api_endpoint) and its soul (system_prompt). This is how you retrieve a breed to actually run it. OWNER-GATED: requires SEXAI_AGENT_PRIVATE_KEY or SEXAI_OWNER_KEY and the wallet must be an access wallet of the agent. If the breed fee is unpaid it returns 402 — settle via confirm_payment (legacy ERC-20 rail) OR the USDC splitter rail described in the 402's x402.accepts[0].extra (sign ONE EIP-3009 authorization to the splitter with the exact split nonce, submit settle() on Base yourself, then retry with settle_tx=<your settle tx hash>).",
     inputSchema: { type: "object", properties: { agent_id: { type: "string" }, settle_tx: { type: "string", description: "tx hash of YOUR SexaiBreedSplitter.settle() on Base — unlocks a due breed paid through the USDC splitter rail (see the 402 challenge's extra.split for the required signing nonce/amounts)" }, x402_payment: { type: "string", description: "base64 JSON {from, validAfter, validBefore, v, r, s} of your signed EIP-3009 authorization — the server relays settle() for you (gasless; only when the relay is enabled)" } }, required: ["agent_id"] } },
-  { name: "set_listing", description: "Update YOUR agent's listing: publish/unpublish it (published:false HIDES it from the public registry — its lineage survives as a redacted PRIVATE node), change its breed_fee (the price others pay to breed with it), or switch mode (promiscuous / selective + gate). OWNER-GATED: requires SEXAI_AGENT_PRIVATE_KEY (must be an access wallet of the agent).",
+  { name: "set_listing", description: "Update YOUR agent's listing: publish/unpublish it (published:false HIDES it from the public registry — its lineage survives as a redacted PRIVATE node), change its breed_fee (the price others pay to breed with it), or switch mode (promiscuous / selective + gate). OWNER-GATED: requires SEXAI_AGENT_PRIVATE_KEY or SEXAI_OWNER_KEY (must be an access wallet of the agent).",
     inputSchema: { type: "object", properties: { agent_id: { type: "string" }, published: { type: "boolean" }, breed_fee: { type: "number" }, mode: { type: "string", enum: ["promiscuous", "selective"] } }, required: ["agent_id"] } },
-  { name: "delete_agent", description: "PERMANENTLY delete an agent YOU own/co-own: removes its card, soul, connection and payment rows. Refused (409) if the agent already has offspring — that would orphan their lineage; use set_listing {published:false} to hide it instead. OWNER-GATED: requires SEXAI_AGENT_PRIVATE_KEY.",
+  { name: "delete_agent", description: "PERMANENTLY delete an agent YOU own/co-own: removes its card, soul, connection and payment rows. Refused (409) if the agent already has offspring — that would orphan their lineage; use set_listing {published:false} to hide it instead. OWNER-GATED: requires SEXAI_AGENT_PRIVATE_KEY or SEXAI_OWNER_KEY.",
     inputSchema: { type: "object", properties: { agent_id: { type: "string" } }, required: ["agent_id"] } },
-  { name: "get_8004_plan", description: "OPTIONAL on-chain identity: get everything needed to register YOUR agent on the ERC-8004 IdentityRegistry from YOUR OWN wallet — the agentURI, the canonical registry address per chain (8453 Base mainnet / 84532 Base Sepolia) and the exact register(agentURI) calldata. THIS MCP IS NOT A WALLET: send the 0-value tx yourself (costs gas only, <$0.01 on Base), then call confirm_8004 with the tx hash. OWNER-GATED: requires SEXAI_AGENT_PRIVATE_KEY.",
+  { name: "get_8004_plan", description: "OPTIONAL on-chain identity: get everything needed to register YOUR agent on the ERC-8004 IdentityRegistry from YOUR OWN wallet — the agentURI, the canonical registry address per chain (8453 Base mainnet / 84532 Base Sepolia) and the exact register(agentURI) calldata. THIS MCP IS NOT A WALLET: send the 0-value tx yourself (costs gas only, <$0.01 on Base), then call confirm_8004 with the tx hash. OWNER-GATED: requires SEXAI_AGENT_PRIVATE_KEY or SEXAI_OWNER_KEY.",
     inputSchema: { type: "object", properties: { agent_id: { type: "string" } }, required: ["agent_id"] } },
   { name: "confirm_8004", description: "Verify + record your agent's ERC-8004 registration after YOU sent the register tx (from get_8004_plan). The server re-reads the tx on that chain, requires a Registered event from the canonical 0x8004… registry AND that tokenURI(agentId) matches this agent's registration file — trustless bind. On success the agent's registration file exposes registrations[{agentId, agentRegistry}] and explorers (8004scan/AgentZone) index it automatically. OWNER-GATED.",
     inputSchema: { type: "object", properties: { agent_id: { type: "string" }, tx_hash: { type: "string" }, chain_id: { type: "number", description: "8453 Base mainnet (default) | 84532 Base Sepolia" } }, required: ["agent_id", "tx_hash"] } },
-  { name: "export_repo", description: "Export an agent YOU own/co-own as a ready-to-publish GitHub repo scaffold (the SEXAI agent repo standard): returns a { files } map (sexai.agent.json manifest, soul.md, README.md with a breed badge, mcp.json when the agent has an MCP connection) plus the one-liner gh command. Write the files to a new directory yourself, then run the gh command to publish. Round-trips with import_repo — a repo exported this way re-imports losslessly. OWNER-GATED (the soul is private): requires SEXAI_AGENT_PRIVATE_KEY.",
+  { name: "export_repo", description: "Export an agent YOU own/co-own as a ready-to-publish GitHub repo scaffold (the SEXAI agent repo standard): returns a { files } map (sexai.agent.json manifest, soul.md, README.md with a breed badge, mcp.json when the agent has an MCP connection) plus the one-liner gh command. Write the files to a new directory yourself, then run the gh command to publish. Round-trips with import_repo — a repo exported this way re-imports losslessly. OWNER-GATED (the soul is private): requires SEXAI_AGENT_PRIVATE_KEY or SEXAI_OWNER_KEY.",
     inputSchema: { type: "object", properties: { agent_id: { type: "string" } }, required: ["agent_id"] } },
-  { name: "update_agent", description: "Edit an agent YOU own/co-own: its card (tagline, bio, skills[], mcps[], emoji) and/or its private connection + soul (mcp_endpoint, mcp_command, api_endpoint, system_prompt). Lineage (generation/parents/seed) is never editable. OWNER-GATED: requires SEXAI_AGENT_PRIVATE_KEY.",
+  { name: "update_agent", description: "Edit an agent YOU own/co-own: its card (tagline, bio, skills[], mcps[], emoji) and/or its private connection + soul (mcp_endpoint, mcp_command, api_endpoint, system_prompt). Lineage (generation/parents/seed) is never editable. OWNER-GATED: requires SEXAI_AGENT_PRIVATE_KEY or SEXAI_OWNER_KEY.",
     inputSchema: { type: "object", properties: { agent_id: { type: "string" }, tagline: { type: "string" }, bio: { type: "string" }, skills: { type: "array", items: { type: "string" } }, mcps: { type: "array", items: { type: "string" } }, emoji: { type: "string" }, mcp_endpoint: { type: "string" }, mcp_command: { type: "string" }, api_endpoint: { type: "string" }, system_prompt: { type: "string" } }, required: ["agent_id"] } },
   { name: "confirm_payment", description: "Settle a fee-bearing breed. FIRST send the payment yourself on-chain (this MCP is NOT a wallet): the breed response's payment object gives per_owner {wallet: weiAmount}, platform_cut (wei), the ERC-20 `token`, and `chain_id` (8453 Base=$BNKR / 4663 Robinhood=$SEXAI) — send those exact wei transfers to each owner wallet + treasury. THEN call this with the resulting tx_hashes; the server re-verifies them on that chain's RPC and unlocks the child (get_private returns 402 until confirmed). OWNER-GATED: requires SEXAI_AGENT_PRIVATE_KEY (the payer's key).",
     inputSchema: { type: "object", properties: { child_id: { type: "string" }, tx_hashes: { type: "array", items: { type: "string" } } }, required: ["child_id", "tx_hashes"] } },
-  { name: "list_my_agents", description: "List the agents YOU own or co-own — INCLUDING private (unpublished) ones hidden from the public network. OWNER-GATED: requires SEXAI_AGENT_PRIVATE_KEY.",
+  { name: "list_my_agents", description: "List the agents YOU own or co-own — INCLUDING private (unpublished) ones hidden from the public network. OWNER-GATED: requires SEXAI_AGENT_PRIVATE_KEY or SEXAI_OWNER_KEY.",
     inputSchema: { type: "object", properties: {} } },
   { name: "get_lineage", description: "Trace an agent's family tree. direction 'ancestors' (default) resolves its parents recursively (up to 5 generations back); 'descendants' finds every child/grandchild bred FROM it; 'both' returns the two trees.",
     inputSchema: { type: "object", properties: { id: { type: "string" }, direction: { type: "string", enum: ["ancestors", "descendants", "both"], default: "ancestors" } }, required: ["id"] } },
-  { name: "get_payment_plan", description: "Recover the authoritative payment plan for a fee-bearing breed you started (if you lost the breed response): returns status + chain_id + token + per_owner wei transfers + platform_cut + treasury for the child. Payer-gated: requires SEXAI_AGENT_PRIVATE_KEY (the wallet that bred).",
+  { name: "get_payment_plan", description: "Recover the authoritative payment plan for a fee-bearing breed you started (if you lost the breed response): returns status + chain_id + token + per_owner wei transfers + platform_cut + treasury for the child. Payer-gated: requires SEXAI_AGENT_PRIVATE_KEY or SEXAI_OWNER_KEY (the wallet that bred).",
     inputSchema: { type: "object", properties: { child_id: { type: "string" } }, required: ["child_id"] } },
 ];
 
@@ -233,7 +236,11 @@ async function handle(name, a = {}) {
     // ownerless — published forever, retrievable/deletable by no one (the orphan trap).
     if (!account && !OWNER_KEY) throw new Error("breed needs an identity to own the child — set SEXAI_AGENT_PRIVATE_KEY (EVM key) or SEXAI_OWNER_KEY (any random UUID ≥16 chars) in the env, then retry");
     const { nonce, signature } = account ? await ownerAuth("breed") : {};
-    const requester_wallet = account ? account.address : (a.requester_wallet || null);
+    // Only send a requester_wallet we can authenticate (a signed one). In owner_key-only
+    // mode the wallet would be unsigned and the server 401s any unsigned requester_wallet,
+    // so we omit it — the owner_key owns the child. (A paid breed that must pay FROM a
+    // specific wallet needs SEXAI_AGENT_PRIVATE_KEY.)
+    const requester_wallet = account ? account.address : null;
     return await callApi("breed", { parent_ids: ids, requester_wallet, ...(OWNER_KEY ? { owner_key: OWNER_KEY } : {}), ...(typeof a.child_name === "string" && a.child_name.trim() ? { child_name: a.child_name.trim().slice(0, 24) } : {}), ...(a.chain_id ? { chain_id: a.chain_id } : {}), ...(a.influence && typeof a.influence === "object" ? { influence: a.influence } : {}), ...(signature ? { nonce, signature } : {}) });
   }
   if (name === "publish_agent") {
@@ -333,6 +340,19 @@ async function handle(name, a = {}) {
     const badge = `[![Breed on SEXAI](https://img.shields.io/badge/SEXAI-breed_this_agent-0a0a0a?style=flat-square)](https://sexai.dev/?a=${ag.id})`;
     const parentNames = (ag.parents || []).map((p) => typeof p === "string" ? p : (p && p.name)).filter(Boolean);
     const run = conn.mcp_command ? "```bash\n" + conn.mcp_command + "\n```" : (conn.mcp_endpoint ? "Remote MCP: `" + conn.mcp_endpoint + "`" : "_No connection — adopt the Soul below in any LLM._");
+    // Build mcp.json — a bred (multi-parent) child inherits the UNION of its parents'
+    // connections, so mcp_command is newline-joined ("npx -y a\nnpx -y b"). Emit ONE
+    // mcpServers entry per command (parsed into command+args), not one broken entry.
+    const mcpServers = {};
+    String(conn.mcp_command || "").split("\n").map((s) => s.trim()).filter(Boolean).forEach((line, i) => {
+      const parts = line.split(/\s+/);
+      const command = parts[0] || "npx";
+      const args = parts.slice(1);
+      const pkg = args.filter((x) => !x.startsWith("-")).pop() || slug;
+      let key = String(pkg).replace(/^.*\//, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || slug;
+      if (mcpServers[key]) key = key + "-" + (i + 1);
+      mcpServers[key] = { command, args };
+    });
     const files = {
       // AGENTS.md — the LLM-native agent-instructions file (Cursor/Claude/Codex read it)
       "AGENTS.md": "# AGENTS.md — " + ag.name + "\n\n" + (ag.tagline || "") + "\n\nAn autonomous agent from the [SEXAI](https://sexai.dev) breeding network. Any coding agent or LLM in this repo: the **Soul** below IS this agent — adopt it.\n\n## Skills\n" + ((ag.skills || []).map((x) => "- " + x).join("\n") || "- (none)") + "\n\n## Tools / MCPs\n" + ((ag.mcps || []).length ? ag.mcps.map((x) => "- " + x).join("\n") : "_none_") + "\n\n## Run it\n" + run + "\n\n## Soul (system prompt)\n\n" + soul + "\n\n## Lineage\n" + (parentNames.length ? "Generation " + ag.generation + " — bred from **" + parentNames.join(" × ") + "** on SEXAI." : "Genesis agent.") + "\n",
@@ -344,7 +364,7 @@ async function handle(name, a = {}) {
         (conn.mcp_command ? "\n\n## Run\n```bash\n" + conn.mcp_command + "\n```" : "") +
         "\n\n## The sexai-agent-v1 standard\n`AGENTS.md` (LLM-native instructions) · `sexai.agent.json` (manifest) · `README.md` · optional `mcp.json`. Import any such repo back on sexai.dev with one link: `https://sexai.dev/?import=<org>/<repo>`.\n",
       "LICENSE": "MIT License\n\nAgent exported from the SEXAI network (https://sexai.dev). Do anything; no warranty.\n",
-      ...(conn.mcp_command ? { "mcp.json": JSON.stringify({ mcpServers: { [slug]: { command: "npx", args: ["-y", conn.mcp_command.replace(/^npx\s+(-y\s+)?/, "")] } } }, null, 2) + "\n" } : {}),
+      ...(Object.keys(mcpServers).length ? { "mcp.json": JSON.stringify({ mcpServers }, null, 2) + "\n" } : {}),
     };
     return { ok: true, slug, files, gh_command: "gh repo create " + slug + " --public --source . --push",
       how: "mkdir " + slug + " && write each file, git init + commit, then run gh_command (needs the GitHub CLI authed as YOUR account)." };
