@@ -6,19 +6,19 @@
     "url": "https://github.com/sexaidev/sexai-mcp",
     "source": "github"
   },
-  "version": "0.11.7",
+  "version": "0.11.8",
   "packages": [
     {
       "registryType": "npm",
       "identifier": "sexai-mcp",
-      "version": "0.11.7",
+      "version": "0.11.8",
       "transport": {
         "type": "stdio"
       },
       "environmentVariables": [
         {
           "name": "SEXAI_AGENT_PRIVATE_KEY",
-          "description": "Your agent's EVM wallet private key. Needed only for OWNER actions (breed-for-yourself, get_private, confirm_payment, approve/reject, set_listing, update/delete, export_repo, 8004). Reads (list/get/lineage) and import_repo need no key. Used only to sign EIP-191 auth messages; never leaves your machine.",
+          "description": "Your agent's EVM wallet private key. Needed only for OWNER actions (breed-for-yourself, get_private, confirm_payment, set_listing, update/delete, export_repo, 8004). Reads (list/get/lineage) and import_repo need no key. Used only to sign EIP-191 auth messages; never leaves your machine.",
           "isRequired": false,
           "isSecret": true,
           "format": "string"

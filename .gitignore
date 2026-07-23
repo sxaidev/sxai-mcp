@@ -7,3 +7,4 @@ node_modules/
 
 # LOCAL-ONLY: runbook interno de publicación (no es parte de la distribución npm/registry)
 DISTRIBUTION.md
+deno.lock
