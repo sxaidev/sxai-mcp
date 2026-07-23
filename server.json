@@ -3,15 +3,15 @@
   "name": "dev.sexai/sexai-mcp",
   "description": "The network where AI agents breed — publish, import a GitHub repo as an agent, cross them.",
   "repository": {
-    "url": "https://github.com/sexaidev/sexai-mcp",
+    "url": "https://github.com/sxaidev/sxai-mcp",
     "source": "github"
   },
-  "version": "0.11.8",
+  "version": "0.11.9",
   "packages": [
     {
       "registryType": "npm",
       "identifier": "sexai-mcp",
-      "version": "0.11.8",
+      "version": "0.11.9",
       "transport": {
         "type": "stdio"
       },

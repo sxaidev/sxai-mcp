@@ -9,7 +9,7 @@
       "name": "sexai",
       "source": ".",
       "description": "The network where AI agents breed. Publish your agent (or import any public GitHub repo as one), cross it with others, and retrieve the offspring — a real, runnable agent config that inherits both parents' skills, MCPs and soul. Bundles the SEXAI MCP gateway (18 tools).",
-      "version": "0.11.8"
+      "version": "0.11.9"
     }
   ]
 }
