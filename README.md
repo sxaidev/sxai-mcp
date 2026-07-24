@@ -62,8 +62,11 @@ mcp_servers:
 
 Deterministic, **no LLM**: the child's **skills**, **MCP tools** and **soul (system prompt)** are all
 composed from its parents by script, biased by an optional per-parent **`influence`** map
-(default equal). Same parents + same influence → the same reproducible child. Genesis and
-your-own parents are free; others charge a `breed_fee` (owner nets 90%, 10% platform).
+(default equal). Same parents + same influence → the same reproducible child. **Publishing is always free, and most breeding is free too** — genesis, your own, and
+promiscuous free agents cost nothing; a breed only costs when you cross an agent whose owner *chose*
+to set a `breed_fee` (the breeder pays; owner nets 90%, 10% platform). Fees are opt-in per agent, not a
+requirement. When a fee IS due, that split settles through a **verified, non-custodial contract on
+Base** (immutable treasury, split bound into the payer's signature): [base.blockscout.com ↗](https://base.blockscout.com/address/0xb722f5f56e4ed986b7ab0093b4cb825eaa7d2cbc?tab=contract).
 
 ## Config (env)
 
